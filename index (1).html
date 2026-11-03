@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Musik Saya</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap">
+<style>
+  :root {
+    --bg: #f6f3fb; --surface: #ffffff; --text: #1d1530; --muted: #6d6485;
+    --accent: #e0345f; --line: #e3dcf0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17111f; --surface: #221a31; --text: #f2edf9; --muted: #a79bc0; --accent: #ff6b8b; --line: #33284a; }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: 'Bricolage Grotesque', system-ui, sans-serif; background: var(--bg); color: var(--text);
+         min-height: 100vh; padding: 24px 16px 140px; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 2.2rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: 16px; }
+  form { display: flex; gap: 8px; margin-bottom: 20px; }
+  input { flex: 1; padding: 12px 14px; font: inherit; color: inherit; background: var(--surface);
+          border: 1px solid var(--line); border-radius: 10px; }
+  button { font: inherit; cursor: pointer; }
+  form button { padding: 0 18px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 600; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #status { color: var(--muted); padding: 24px 0; }
+  .song { display: flex; gap: 12px; align-items: center; width: 100%; padding: 8px; text-align: left;
+          background: none; border: 0; border-radius: 10px; color: inherit; }
+  .song:hover, .song.on { background: var(--surface); }
+  .song img { width: 52px; height: 52px; border-radius: 6px; object-fit: cover; background: var(--line); }
+  .song b { display: block; font-weight: 600; }
+  .song small { color: var(--muted); }
+  .song .t { flex: 1; min-width: 0; }
+  .song .t > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .song.on b { color: var(--accent); }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+         background: var(--surface); border-top: 1px solid var(--line); }
+  #bar .in { max-width: 640px; margin: 0 auto; display: flex; gap: 12px; align-items: center; }
+  #bar img { width: 44px; height: 44px; border-radius: 6px; background: var(--line); object-fit: cover; }
+  #now { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #now small { display: block; color: var(--muted); font-weight: 400; }
+  #play { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 1.1rem; }
+  #seek { width: 100%; accent-color: var(--accent); margin-top: 8px; }
+  #bar .col { flex: 1; min-width: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Musik Saya</h1>
+  <form id="f">
+    <input id="q" type="search" placeholder="Cari lagu atau artis" autocomplete="off" aria-label="Cari lagu atau artis">
+    <button>Cari</button>
+  </form>
+  <div id="status">Ketik judul lagu untuk mulai mencari.</div>
+  <div id="list"></div>
+</main>
+
+<div id="bar">
+  <div class="in">
+    <img id="cover" alt="" hidden>
+    <div class="col">
+      <div id="now">Belum ada lagu diputar</div>
+      <input id="seek" type="range" min="0" max="100" value="0" aria-label="Posisi lagu">
+    </div>
+    <button id="play" aria-label="Putar atau jeda">▶</button>
+  </div>
+</div>
+<audio id="audio" preload="none"></audio>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const audio = $('audio');
+let songs = [], current = -1;
+
+$('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('q').value.trim();
+  if (!q) return;
+  $('status').textContent = 'Mencari…';
+  $('list').innerHTML = '';
+  try {
+    const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+    songs = await res.json();
+    if (!res.ok) throw new Error(songs.error || 'Gagal mencari');
+    $('status').textContent = songs.length ? '' : 'Tidak ada hasil. Coba kata kunci lain.';
+    render();
+  } catch (err) {
+    $('status').textContent = 'Pencarian gagal: ' + err.message;
+  }
+});
+
+function render() {
+  $('list').innerHTML = '';
+  songs.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'song' + (i === current ? ' on' : '');
+    const img = document.createElement('img'); img.src = s.thumb; img.alt = ''; img.loading = 'lazy';
+    const t = document.createElement('div'); t.className = 't';
+    const title = document.createElement('b'); title.textContent = s.title;
+    const sub = document.createElement('small'); sub.textContent = s.artist;
+    t.append(title, sub);
+    const d = document.createElement('small'); d.textContent = s.duration;
+    b.append(img, t, d);
+    b.onclick = () => playSong(i);
+    $('list').append(b);
+  });
+}
+
+function playSong(i) {
+  const s = songs[i]; if (!s) return;
+  current = i;
+  audio.src = '/api/stream?id=' + encodeURIComponent(s.id);
+  audio.play().catch(() => { $('now').textContent = 'Gagal memutar lagu ini'; });
+  $('now').innerHTML = '';
+  $('now').append(s.title, Object.assign(document.createElement('small'), { textContent: s.artist }));
+  $('cover').src = s.thumb; $('cover').hidden = false;
+  render();
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: s.title, artist: s.artist, artwork: [{ src: s.thumb }]
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => playSong(current + 1));
+    navigator.mediaSession.setActionHandler('previoustrack', () => playSong(current - 1));
+  }
+}
+
+$('play').onclick = () => (audio.paused ? audio.play() : audio.pause());
+audio.onplay = () => ($('play').textContent = '❚❚');
+audio.onpause = () => ($('play').textContent = '▶');
+audio.onended = () => playSong(current + 1);
+audio.ontimeupdate = () => { if (audio.duration) $('seek').value = (audio.currentTime / audio.duration) * 100; };
+$('seek').oninput = () => { if (audio.duration) audio.currentTime = ($('seek').value / 100) * audio.duration; };
+</script>
+</body>
+</html>
