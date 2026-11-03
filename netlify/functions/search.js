@@ -1,31 +1,47 @@
 import { Innertube } from 'youtubei.js';
 
-let yt; // dipakai ulang antar request selama function masih "hangat"
+let yt;
 const getYT = async () => (yt ??= await Innertube.create({ generate_session_locally: true }));
 
+const CLIENTS = ['YTMUSIC', 'ANDROID', 'TV', 'WEB_EMBEDDED', 'IOS', 'MWEB'];
+
+async function getAudioUrl(innertube, id) {
+  const errors = [];
+  for (const client of CLIENTS) {
+    try {
+      const info = await innertube.getBasicInfo(id, { client });
+      const format = info.chooseFormat({ type: 'audio', quality: 'best' });
+      const url = format.url ?? (await format.decipher(innertube.session.player));
+      if (url) return url;
+    } catch (e) {
+      errors.push(client + ': ' + e.message);
+    }
+  }
+  throw new Error(errors.join(' | '));
+}
+
 export default async (req) => {
-  const q = new URL(req.url).searchParams.get('q')?.trim();
-  if (!q) return Response.json({ error: 'Parameter q wajib diisi' }, { status: 400 });
+  const id = new URL(req.url).searchParams.get('id');
+  if (!id) return new Response('Parameter id wajib diisi', { status: 400 });
 
   try {
     const innertube = await getYT();
-    const res = await innertube.music.search(q, { type: 'song' });
-    const items = res.songs?.contents ?? res.contents?.flatMap((s) => s.contents ?? []) ?? [];
+    const url = await getAudioUrl(innertube, id);
 
-    const songs = items
-      .filter((i) => i.id)
-      .map((i) => ({
-        id: i.id,
-        title: i.title,
-        artist: i.artists?.map((a) => a.name).join(', ') || i.author?.name || '',
-        thumb: i.thumbnails?.at(-1)?.url || '',
-        duration: i.duration?.text || '',
-      }));
+    const headers = {};
+    const range = req.headers.get('range');
+    if (range) headers.range = range;
 
-    return Response.json(songs);
+    const upstream = await fetch(url, { headers });
+    const out = new Headers();
+    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      const v = upstream.headers.get(h);
+      if (v) out.set(h, v);
+    }
+    return new Response(upstream.body, { status: upstream.status, headers: out });
   } catch (e) {
-    return Response.json({ error: e.message }, { status: 500 });
+    return new Response(e.message, { status: 500 });
   }
 };
 
-export const config = { path: '/api/search' };
+export const config = { path: '/api/stream' };
